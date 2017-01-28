@@ -12,6 +12,9 @@ from pywink.devices.sensors import WinkSensorPod, WinkHumiditySensor, WinkBright
     WinkCoDetector, WinkHub
 from pywink.devices.types import DEVICE_ID_KEYS
 
+from pywink.groups.factory import build_group
+from pywink.groups.group import WinkGroup
+
 API_HEADERS = {}
 CLIENT_ID = None
 CLIENT_SECRET = None
@@ -47,6 +50,32 @@ class WinkApiInterface(object):
                 raise WinkAPIException("Failed to refresh access token.")
         return arequest.json()
 
+
+    def set_group_state(self, group, state, id_override=None):
+        """
+        :type device: WinkDevice
+        :param state:   a boolean of true (on) or false ('off')
+        :return: The JSON response from the API (new device state)
+        """
+        _id = group.device_id()
+        if id_override:
+            _id = id_override
+        url_string = "{}/groups/{}/activate".format(self.BASE_URL,
+                                       _id)
+        arequest = requests.post(url_string,
+                                data=json.dumps(state),
+                                headers=API_HEADERS)
+        if arequest.status_code == 401:
+            new_token = refresh_access_token()
+            if new_token:
+                arequest = requests.put(url_string,
+                                        data=json.dumps(state),
+                                        headers=API_HEADERS)
+            else:
+                raise WinkAPIException("Failed to refresh access token.")
+        return arequest.json()		
+		
+		
     def get_device_state(self, device, id_override=None):
         """
         :type device: WinkDevice
@@ -361,7 +390,40 @@ def refresh_state_at_hub(device):
                                            device.device_id())
     requests.get(url_string, headers=API_HEADERS)
 
+	
+def wink_api_fetch_groups():
+    arequest_url = "{}/users/me/groups".format(WinkApiInterface.BASE_URL)
+    response = requests.get(arequest_url, headers=API_HEADERS)
+    if response.status_code == 200:
+        return response.json()
 
+    if response.status_code == 401:
+        raise WinkAPIException("401 Response from Wink API.  Maybe Bearer token is expired?")
+    else:
+        raise WinkAPIException("Unexpected")
+
+	
+def get_groups():
+    response_dict = wink_api_fetch_groups()
+    return get_groups_from_response_dict(response_dict)
+	
+	
+def get_groups_from_response_dict(response_dict):
+    """
+    :rtype: list of WinkGroup
+    """
+    items = response_dict.get('data')
+
+    groups = []
+
+    api_interface = WinkApiInterface()
+
+    for item in items:
+        groups.append(build_group(item, api_interface))
+
+    return groups
+
+	
 def is_token_set():
     """ Returns if an auth token has been set. """
     return bool(API_HEADERS)
